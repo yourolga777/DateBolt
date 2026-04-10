@@ -12,9 +12,16 @@ import java.util.ArrayList;
 public class TinderBoltApp extends MultiSessionTelegramBot {
     public static final String TELEGRAM_BOT_NAME = "dating_Javarush_ai_bot";
 
-    private static final Dotenv dotenv = Dotenv.load();
-    public static final String TELEGRAM_BOT_TOKEN = dotenv.get("TELEGRAM_BOT_TOKEN");
-    public static final String OPEN_AI_TOKEN = dotenv.get("OPEN_AI_TOKEN");
+    public static final String TELEGRAM_BOT_TOKEN = getEnv("TELEGRAM_BOT_TOKEN");
+    public static final String OPEN_AI_TOKEN = getEnv("OPEN_AI_TOKEN");
+
+    private static String getEnv(String name) {
+        String value = System.getenv(name);
+        if (value == null) {
+            throw new IllegalStateException("Missing environment variable: " + name);
+        }
+        return value;
+    }
 
     private ChatGPTService chatGPT;
     private DialogMode currentMode = null;
