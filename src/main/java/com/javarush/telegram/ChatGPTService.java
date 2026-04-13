@@ -1,91 +1,172 @@
 package com.javarush.telegram;
 
-import com.plexpt.chatgpt.ChatGPT;
-import com.plexpt.chatgpt.entity.chat.ChatCompletion;
-import com.plexpt.chatgpt.entity.chat.ChatCompletionResponse;
-import com.plexpt.chatgpt.entity.chat.Message;
-
-import java.net.InetSocketAddress;
-import java.net.Proxy;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public class ChatGPTService {
-    private ChatGPT chatGPT;
+    private final String apiKey;
+    private final HttpClient httpClient;
+    private List<Message> messageHistory = new ArrayList<>();
 
-    private List<Message> messageHistory = new ArrayList<>(); //История переписки с ChatGPT - нужна для диалогов
+    // Внутренний класс для хранения сообщений
+    private static class Message {
+        String role;
+        String content;
+
+        Message(String role, String content) {
+            this.role = role;
+            this.content = content;
+        }
+    }
 
     public ChatGPTService(String token) {
-        this.chatGPT = ChatGPT.builder()
-                .apiKey(token)
-                .apiHost("https://openai.javarush.com/")
-                .build()
-                .init();
+        this.apiKey = token;
+        this.httpClient = HttpClient.newHttpClient();
     }
 
     /**
-     * Одиночный запрос к ChatGPT по формату "запрос"-> "ответ".
+     * Одиночный запрос к DeepSeek по формату "запрос" -> "ответ".
      * Запрос состоит из двух частей:
-     *      prompt - контектс вопроса
-     *      question - сам запрос
+     *      prompt - контекст вопроса (системное сообщение)
+     *      question - сам запрос пользователя
      */
     public String sendMessage(String prompt, String question) {
-        Message system = Message.ofSystem(prompt);
-        Message message = Message.of(question);
-        messageHistory = new ArrayList<>(Arrays.asList(system, message));
+        // Очищаем историю и добавляем системный промпт и вопрос пользователя
+        messageHistory.clear();
+        messageHistory.add(new Message("system", prompt));
+        messageHistory.add(new Message("user", question));
 
-        return sendMessagesToChatGPT();
+        return sendToDeepSeek();
     }
 
     /**
-     * Запросы к ChatGPT с сохранением истории сообщений.
-     * Метод setPrompt() задает контект запроса
+     * Запросы к DeepSeek с сохранением истории сообщений.
+     * Метод setPrompt() задаёт контекст запроса (системный промпт)
      */
     public void setPrompt(String prompt) {
-        Message system = Message.ofSystem(prompt);
-        messageHistory = new ArrayList<>(List.of(system));
+        messageHistory.clear();
+        messageHistory.add(new Message("system", prompt));
     }
+
+    /**
+     * Устанавливает системный промпт (альтернативный метод)
+     */
     public void setSystemPrompt(String systemPrompt) {
-        // Если у вас есть поле для системного промпта – сохраните его
-        // Если используете messageHistory, можно добавить system message в начало истории
         if (systemPrompt != null && !systemPrompt.isEmpty()) {
-            Message systemMessage = new Message();
-            systemMessage.setRole("system");
-            systemMessage.setContent(systemPrompt);
-            // Добавляем в начало списка или очищаем историю и добавляем первой
             messageHistory.clear();
-            messageHistory.add(systemMessage);
+            messageHistory.add(new Message("system", systemPrompt));
         }
     }
 
     /**
-     * Запросы к ChatGPT с сохранением истории сообщений.
+     * Запросы к DeepSeek с сохранением истории сообщений.
      * Метод addMessage() добавляет новый вопрос (сообщение) в чат.
      */
     public String addMessage(String question) {
-        Message message = Message.of(question);
-        messageHistory.add(message);
-
-        return sendMessagesToChatGPT();
+        messageHistory.add(new Message("user", question));
+        return sendToDeepSeek();
     }
 
     /**
-     * Отправляем ChatGPT серию сообщений: prompt, message1, answer1, message2, answer2, ..., messageN
-     * Ответ ChatGPT добавляется в конец messageHistory для последующейго использования
+     * Отправляем DeepSeek серию сообщений
      */
-    private String sendMessagesToChatGPT(){
-        ChatCompletion chatCompletion = ChatCompletion.builder()
-                .model(ChatCompletion.Model.GPT4oMini) // GPT4oMini or GPT_3_5_TURBO
-                .messages(messageHistory)
-                .maxTokens(3000)
-                .temperature(0.9)
-                .build();
+    private String sendToDeepSeek() {
+        try {
+            String jsonBody = buildJsonRequest();
 
-        ChatCompletionResponse response = chatGPT.chatCompletion(chatCompletion);
-        Message res = response.getChoices().get(0).getMessage();
-        messageHistory.add(res);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.deepseek.com/v1/chat/completions"))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
 
-        return res.getContent();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            String answer = parseResponse(response.body());
+
+            // Сохраняем ответ в историю
+            if (answer != null && !answer.isEmpty()) {
+                messageHistory.add(new Message("assistant", answer));
+            }
+
+            return answer != null ? answer : "Ошибка: не удалось получить ответ";
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Ошибка: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Формирует JSON-запрос для DeepSeek API
+     */
+    private String buildJsonRequest() {
+        StringBuilder messagesJson = new StringBuilder();
+        messagesJson.append("[");
+        for (int i = 0; i < messageHistory.size(); i++) {
+            Message msg = messageHistory.get(i);
+            messagesJson.append("{\"role\":\"").append(escapeJson(msg.role))
+                    .append("\",\"content\":\"").append(escapeJson(msg.content))
+                    .append("\"}");
+            if (i < messageHistory.size() - 1) {
+                messagesJson.append(",");
+            }
+        }
+        messagesJson.append("]");
+
+        return String.format("""
+                {
+                    "model": "deepseek-chat",
+                    "messages": %s,
+                    "stream": false,
+                    "max_tokens": 3000,
+                    "temperature": 0.9
+                }
+                """, messagesJson.toString());
+    }
+
+    /**
+     * Парсит ответ DeepSeek API
+     */
+    private String parseResponse(String response) {
+        // Ищем поле "content"
+        int start = response.indexOf("\"content\":\"");
+        if (start == -1) {
+            // Пробуем другой формат
+            start = response.indexOf("\"content\": \"");
+            if (start == -1) {
+                return null;
+            }
+            start += 12;
+        } else {
+            start += 11;
+        }
+
+        int end = response.indexOf("\"", start);
+        if (end == -1) {
+            return null;
+        }
+
+        return response.substring(start, end)
+                .replace("\\n", "\n")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+    }
+
+    /**
+     * Экранирует специальные символы для JSON
+     */
+    private String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 }
