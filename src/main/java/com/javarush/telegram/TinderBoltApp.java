@@ -5,16 +5,22 @@ import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
-import io.github.cdimascio.dotenv.Dotenv;
 
 import java.util.ArrayList;
 
 public class TinderBoltApp extends MultiSessionTelegramBot {
     public static final String TELEGRAM_BOT_NAME = "dating_Javarush_ai_bot";
 
-    private static final Dotenv dotenv = Dotenv.load();
-    public static final String TELEGRAM_BOT_TOKEN = dotenv.get("TELEGRAM_BOT_TOKEN");
-    public static final String OPEN_AI_TOKEN = dotenv.get("OPEN_AI_TOKEN");
+    public static final String TELEGRAM_BOT_TOKEN = System.getenv("TELEGRAM_BOT_TOKEN");
+    public static final String OPEN_AI_TOKEN = System.getenv("OPEN_AI_TOKEN");
+
+    static {
+        if (TELEGRAM_BOT_TOKEN == null || OPEN_AI_TOKEN == null) {
+            System.err.println("ОШИБКА: Переменные окружения не найдены!");
+            System.err.println("TELEGRAM_BOT_TOKEN = " + TELEGRAM_BOT_TOKEN);
+            System.err.println("OPEN_AI_TOKEN = " + OPEN_AI_TOKEN);
+        }
+    }
 
     private ChatGPTService chatGPT;
     private DialogMode currentMode = null;
